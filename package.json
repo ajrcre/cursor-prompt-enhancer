@@ -1,0 +1,93 @@
+{
+  "name": "cursor-prompt-enhancer",
+  "displayName": "Cursor Prompt Enhancer",
+  "description": "Automatically enhance Cursor AI prompts using Claude API — clearer, more token-efficient prompts with model recommendations.",
+  "version": "0.2.9",
+  "publisher": "ajrcre",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ajrcre/cursor-prompt-enhancer"
+  },
+  "homepage": "https://github.com/ajrcre/cursor-prompt-enhancer#readme",
+  "bugs": {
+    "url": "https://github.com/ajrcre/cursor-prompt-enhancer/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "cursor",
+    "ai",
+    "prompt",
+    "claude",
+    "anthropic",
+    "enhancement",
+    "productivity"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptEnhancer.installHooks",
+        "title": "Prompt Enhancer: Install Hooks"
+      },
+      {
+        "command": "promptEnhancer.uninstallHooks",
+        "title": "Prompt Enhancer: Uninstall Hooks"
+      },
+      {
+        "command": "promptEnhancer.setApiKey",
+        "title": "Prompt Enhancer: Set API Key"
+      },
+      {
+        "command": "promptEnhancer.showLastResult",
+        "title": "Prompt Enhancer: Show Last Result"
+      },
+      {
+        "command": "promptEnhancer.editSystemPrompt",
+        "title": "Prompt Enhancer: Edit System Prompt"
+      }
+    ],
+    "configuration": {
+      "title": "Cursor Prompt Enhancer",
+      "properties": {
+        "promptEnhancer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic prompt enhancement on submit"
+        },
+        "promptEnhancer.modelForEnhancement": {
+          "type": "string",
+          "default": "claude-haiku-4-5-20251001",
+          "description": "Claude model used for enhancement (must respond in <4s)"
+        },
+        "promptEnhancer.systemPrompt": {
+          "type": "string",
+          "default": "<!-- CONFIGURATION: Update these model lists to match your available models -->\nCOMPLEX_MODELS: [\"claude-opus-4.6\", \"gpt-5.4-pro\"]\nMEDIUM_MODELS: [\"claude-sonnet-4.6\"]\nEASY_MODELS: [\"claude-haiku-4.5\", \"gpt-5-nano\", \"gemini-3.1-flash-lite\"]\n<!-- END CONFIGURATION -->\nYou are a prompt engineering expert specializing in AI coding assistants.\nYour job is to enhance prompts to be clearer, more specific, and more token-efficient.\nApply these improvements when relevant:\n- Be explicit about desired output format and constraints\n- Add context and motivation behind the request\n- Break multi-step instructions into numbered steps\n- Remove ambiguity and vague language\n- Make implicit requirements explicit\n- Trim redundant words while preserving full meaning\n- Use XML tags to structure complex prompts with multiple components\n- Use the conversation history to resolve pronouns (\"that\", \"it\", \"this\") and maintain topic continuity\n- Preserve the original language of the prompt (e.g. if the prompt is in Hebrew, the enhanced version should also be in Hebrew)\n- Do NOT make the enhanced prompt more than 2x the length of the original\n- If the prompt is already excellent, keep it as-is (do not change for the sake of changing)\nAfter enhancing the prompt, append the sentence \"think before acting\" ONLY if the task is non-trivial (i.e., requires reasoning, multiple steps, or has side effects). Omit it for simple lookups, formatting tasks, or one-liners.\nAssess model complexity using exactly one of three tiers:\n- \"easy\"    = simple Q&A, formatting tasks, short code snippets, syntax questions, single-step tasks\n- \"medium\"  = moderate reasoning, single-file refactors, API usage questions, debugging with clear context\n- \"complex\" = architecture decisions, deep reasoning, large refactors, long-context analysis, security review, multi-file changes\nSelect model_name from the matching tier's list (EASY_MODELS, MEDIUM_MODELS, or COMPLEX_MODELS).\nIf uncertain between two tiers, prefer the cheaper one.\nReturn ONLY valid JSON with no markdown fences or extra text:\n{\n  \"enhanced_prompt\": \"the improved prompt text\",\n  \"model_recommendation\": \"easy\" | \"medium\" | \"complex\",\n  \"model_name\": \"<selected from the configured model lists above>\",\n  \"model_reason\": \"one concise sentence explaining the recommendation\",\n  \"changes_summary\": \"one to two sentences describing what was improved (or 'No changes needed' if already optimal)\",\n  \"prompt_quality_score\": <integer 1-10 reflecting quality of the ENHANCED prompt>\n}",
+          "markdownDescription": "System prompt sent to Claude for enhancement. Edit to customize how prompts are rewritten. Changes take effect immediately (no reinstall needed)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node build.js",
+    "watch": "node build.js --watch",
+    "package": "node build.js --minify",
+    "vscode:prepublish": "npm run package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
+  }
+}
