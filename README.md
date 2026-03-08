@@ -21,6 +21,20 @@ Enhanced:  "The JWT refresh logic in src/auth/token.ts fails when the access tok
 
 The extension also recommends which model tier to use for the task (easy/medium/complex), drawing from configurable model lists.
 
+## Screenshots
+
+**1. Hook intercepts the submission**
+
+![Cursor chat showing the submission blocked by hook](images/chat-hook.png)
+
+**2. QuickPick lets you choose enhanced or original**
+
+![QuickPick showing enhanced and original prompt options](images/popup.png)
+
+**3. Fully configurable from Settings**
+
+![Extension settings showing model and system prompt options](images/settings.png)
+
 ## Requirements
 
 - [Cursor](https://cursor.com) editor

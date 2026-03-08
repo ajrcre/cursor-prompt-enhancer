@@ -4,6 +4,7 @@ node_modules/**
 src/**
 hooks/**
 out/**
+images/**
 build.js
 tsconfig.json
 **/*.map
