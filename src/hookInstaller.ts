@@ -65,7 +65,7 @@ function mergeHooksJson(): void {
     }
     const alreadyPresent = hooks.hooks[event].some(e => e.command === HOOK_COMMAND);
     if (!alreadyPresent) {
-      hooks.hooks[event].push({ command: HOOK_COMMAND, timeout: 5 });
+      hooks.hooks[event].push({ command: HOOK_COMMAND, timeout: 10 });
     }
   }
 
@@ -76,16 +76,17 @@ function mergeHooksJson(): void {
 export async function installHooks(apiKey: string): Promise<void> {
   const vscodeConfig = vscode.workspace.getConfiguration('promptEnhancer');
   const model = vscodeConfig.get<string>('modelForEnhancement', 'claude-haiku-4-5-20251001');
-  const enabled = vscodeConfig.get<boolean>('enabled', true);
 
+  const useLocalLlm      = vscodeConfig.get<boolean>('useLocalLlm', false);
   const systemPrompt     = vscodeConfig.get<string>('systemPrompt', '').trim();
   const localLlmEndpoint = vscodeConfig.get<string>('localLlmEndpoint', '').trim();
   const localLlmModel    = vscodeConfig.get<string>('localLlmModel', '').trim();
   const config: HooksConfig = {
-    apiKey, model, enabled,
-    ...(systemPrompt     ? { systemPrompt }     : {}),
-    ...(localLlmEndpoint ? { localLlmEndpoint } : {}),
-    ...(localLlmModel    ? { localLlmModel }    : {}),
+    apiKey, model, enabled: true,
+    ...(useLocalLlm                  ? { useLocalLlm }      : {}),
+    ...(systemPrompt                 ? { systemPrompt }      : {}),
+    ...(localLlmEndpoint             ? { localLlmEndpoint }  : {}),
+    ...(localLlmModel                ? { localLlmModel }     : {}),
   };
   writeHookFiles(config);
   mergeHooksJson();
@@ -115,22 +116,38 @@ export function uninstallHooks(): void {
   }
 }
 
-/** Update the config file (e.g. when API key changes after hooks are installed) */
-export async function updateConfig(apiKey: string): Promise<void> {
+/** Update the config file (e.g. when API key changes after hooks are installed).
+ *  @param enabledOverride — if provided, overrides the `enabled` field; otherwise preserves from existing config. */
+export async function updateConfig(apiKey: string, enabledOverride?: boolean): Promise<void> {
   if (!fs.existsSync(HOOKS_DIR)) {
     return; // Hooks not installed yet — nothing to update
   }
+  // Read existing config to preserve values not managed by VS Code settings
+  let existingConfig: Partial<HooksConfig> = {};
+  if (fs.existsSync(CONFIG_FILE)) {
+    try {
+      existingConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as Partial<HooksConfig>;
+    } catch { /* ignore */ }
+  }
+  // If no key supplied, preserve whatever is already in the config file
+  if (!apiKey) {
+    apiKey = existingConfig.apiKey ?? '';
+  }
+  // Always redeploy the hook script so upgrades take effect without re-running Install Hooks
+  fs.writeFileSync(HOOK_SCRIPT, __HOOK_SCRIPT_SOURCE__, { encoding: 'utf-8', mode: 0o755 });
   const vscodeConfig = vscode.workspace.getConfiguration('promptEnhancer');
-  const model = vscodeConfig.get<string>('modelForEnhancement', 'claude-haiku-4-5-20251001');
-  const enabled = vscodeConfig.get<boolean>('enabled', true);
+  const model            = vscodeConfig.get<string>('modelForEnhancement', 'claude-haiku-4-5-20251001');
+  const enabled          = enabledOverride ?? existingConfig.enabled ?? true;
+  const useLocalLlm      = vscodeConfig.get<boolean>('useLocalLlm', false);
   const systemPrompt     = vscodeConfig.get<string>('systemPrompt', '').trim();
   const localLlmEndpoint = vscodeConfig.get<string>('localLlmEndpoint', '').trim();
   const localLlmModel    = vscodeConfig.get<string>('localLlmModel', '').trim();
   const config: HooksConfig = {
     apiKey, model, enabled,
-    ...(systemPrompt     ? { systemPrompt }     : {}),
-    ...(localLlmEndpoint ? { localLlmEndpoint } : {}),
-    ...(localLlmModel    ? { localLlmModel }    : {}),
+    ...(useLocalLlm      ? { useLocalLlm }      : {}),
+    ...(systemPrompt     ? { systemPrompt }      : {}),
+    ...(localLlmEndpoint ? { localLlmEndpoint }  : {}),
+    ...(localLlmModel    ? { localLlmModel }     : {}),
   };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
 }

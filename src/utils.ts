@@ -29,6 +29,7 @@ export interface HooksConfig {
   apiKey: string;
   model: string;
   enabled: boolean;
+  useLocalLlm?: boolean;
   systemPrompt?: string;
   localLlmEndpoint?: string;
   localLlmModel?: string;

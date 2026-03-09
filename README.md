@@ -70,6 +70,18 @@ Then run `Prompt Enhancer: Install Hooks` if you haven't already.
 
 > **Note:** Local inference uses an 8-second timeout (vs 3.5s for Claude) to accommodate CPU-based machines. On slow hardware, the hook may occasionally pass the prompt through unchanged if the model doesn't respond in time.
 
+## Status bar
+
+Once installed, a `✨` indicator appears in the bottom-right status bar showing the active mode:
+
+| Label | Meaning |
+|---|---|
+| `✨ Claude` | Enhancing via Anthropic Claude API |
+| `✨ Local LLM` | Enhancing locally via Ollama (no data leaves your machine) |
+| `✨ Disabled` | Enhancement is turned off |
+
+Click the indicator to switch between Claude API, Local LLM, or Disable via a quick picker.
+
 ## Usage
 
 1. Type a prompt in any Cursor chat (Ask, Agent, or Plan mode)
@@ -93,6 +105,7 @@ Then run `Prompt Enhancer: Install Hooks` if you haven't already.
 | `Prompt Enhancer: Edit System Prompt` | Open the enhancement instructions in your editor |
 | `Prompt Enhancer: Show Last Result` | Re-show the QuickPick for the most recent enhancement |
 | `Prompt Enhancer: Setup Local LLM` | Install Ollama, download `llama3.2:3b`, and configure local mode |
+| `Prompt Enhancer: Switch Mode` | Switch between Claude API, Local LLM, or Disable (also accessible via the status bar) |
 
 ## Configuration
 
@@ -100,7 +113,6 @@ Open Settings (`Cmd+,`) and search for `Prompt Enhancer`.
 
 | Setting | Default | Description |
 |---|---|---|
-| `promptEnhancer.enabled` | `true` | Enable/disable enhancement |
 | `promptEnhancer.modelForEnhancement` | `claude-haiku-4-5-20251001` | Claude model used for enhancement (must respond in <4s) |
 | `promptEnhancer.systemPrompt` | *(built-in)* | Instructions sent to Claude. Edit via `Prompt Enhancer: Edit System Prompt` |
 | `promptEnhancer.localLlmEndpoint` | *(empty)* | Base URL of a local OpenAI-compatible LLM (e.g. `http://localhost:11434/v1`). Set automatically by `Setup Local LLM`. |
@@ -144,6 +156,16 @@ Cursor chat → beforeSubmitPrompt hook → Claude API (< 3.5s)
 ```
 
 Conversation history (last 3 turns) is maintained in `~/.cursor/hooks/prompt-enhancer-history.json` to give Claude context for follow-up prompts like "make that shorter".
+
+## Troubleshooting
+
+If enhancement isn't working, check the debug log:
+
+```bash
+tail -20 ~/.cursor/hooks/prompt-enhancer-debug.log
+```
+
+Each hook call logs the prompt metadata and API call outcome (`success: true/false`). If you see `success: false`, Ollama may not be running or the API key may be invalid.
 
 ## License
 

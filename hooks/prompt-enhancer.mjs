@@ -111,6 +111,27 @@ function completePendingTurn(history, conversationId, assistantText) {
   }
 }
 
+// ── JSON parsing ─────────────────────────────────────────────────────────────
+
+/** Try to parse JSON from a string, with fallback extraction of first {...} block. */
+function safeParseJson(text) {
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Fallback: extract first {...} block
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(cleaned.substring(start, end + 1)); } catch { /* fall through */ }
+    }
+    return null;
+  }
+}
+
 // ── Claude API ───────────────────────────────────────────────────────────────
 
 const DEFAULT_SYSTEM_PROMPT = `<!-- CONFIGURATION: Update these model lists to match your available models -->
@@ -189,12 +210,7 @@ async function callClaudeApi(apiKey, model, currentPrompt, completedTurns, syste
 
     const data = await response.json();
     const rawText = data.content?.[0]?.text ?? '';
-    const jsonText = rawText
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim();
-
-    return JSON.parse(jsonText);
+    return safeParseJson(rawText);
   } catch {
     clearTimeout(timeoutId);
     return null;
@@ -213,6 +229,7 @@ async function callLocalLlmApi(endpoint, model, currentPrompt, completedTurns, s
       body: JSON.stringify({
         model,
         max_tokens: 1024,
+        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user',   content: buildUserMessage(currentPrompt, completedTurns) },
@@ -223,8 +240,7 @@ async function callLocalLlmApi(endpoint, model, currentPrompt, completedTurns, s
     if (!response.ok) { return null; }
     const data = await response.json();
     const raw = (data.choices?.[0]?.message?.content ?? '').trim();
-    const jsonText = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-    return JSON.parse(jsonText);
+    return safeParseJson(raw);
   } catch {
     clearTimeout(timeoutId);
     return null;
@@ -241,7 +257,7 @@ async function handleBeforeSubmitPrompt(input) {
   }
 
   const config = loadConfig();
-  const usingLocal = !!(config?.localLlmEndpoint && config?.localLlmModel);
+  const usingLocal = !!(config?.useLocalLlm && config?.localLlmEndpoint && config?.localLlmModel);
   if (!config?.apiKey && !usingLocal) {
     process.stdout.write(JSON.stringify({ continue: true }));
     process.exit(0);
@@ -301,6 +317,18 @@ async function handleBeforeSubmitPrompt(input) {
   const result = usingLocal
     ? await callLocalLlmApi(config.localLlmEndpoint, config.localLlmModel, originalPrompt, completedTurns, systemPrompt, timeoutMs)
     : await callClaudeApi(config.apiKey, model, originalPrompt, completedTurns, systemPrompt, timeoutMs);
+
+  // Log API call outcome for diagnostics
+  try {
+    const logLine = JSON.stringify({
+      ts: new Date().toISOString(),
+      event: 'api_result',
+      usingLocal,
+      success: !!result,
+      hasEnhanced: !!result?.enhanced_prompt,
+    }) + '\n';
+    appendFileSync(join(HOOKS_DIR, 'prompt-enhancer-debug.log'), logLine, 'utf-8');
+  } catch { /* non-fatal */ }
 
   if (!result) {
     // Timeout or error — always pass through

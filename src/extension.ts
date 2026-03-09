@@ -8,7 +8,7 @@ import {
   hooksAreInstalled,
   updateConfig,
 } from './hookInstaller';
-import { SECRET_KEY_NAME, SKIP_FILE, EnhancerResult, estimateTokens } from './utils';
+import { SECRET_KEY_NAME, SKIP_FILE, CONFIG_FILE, EnhancerResult, HooksConfig, estimateTokens, debounce } from './utils';
 
 // ── Skip flag ────────────────────────────────────────────────────────────────
 
@@ -89,6 +89,38 @@ async function showPromptQuickPick(result: EnhancerResult): Promise<void> {
       ? '✨ Enhanced prompt copied! Paste (⌘V) into chat and submit.'
       : 'Original prompt copied! Paste (⌘V) into chat and submit.'
   );
+}
+
+// ── Status bar ───────────────────────────────────────────────────────────────
+
+/** Read `enabled` from the deployed config file (not a VS Code setting). */
+function readConfigEnabled(): boolean {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as Partial<HooksConfig>;
+      return config.enabled !== false;
+    }
+  } catch { /* ignore */ }
+  return true;
+}
+
+function updateStatusBar(item: vscode.StatusBarItem): void {
+  const cfg        = vscode.workspace.getConfiguration('promptEnhancer');
+  const enabled    = readConfigEnabled();
+  const useLocal   = cfg.get<boolean>('useLocalLlm', false);
+  const localModel = cfg.get<string>('localLlmModel', '').trim();
+
+  if (!enabled) {
+    item.text    = '✨ Disabled';
+    item.tooltip = 'Prompt Enhancer is disabled — click to switch mode';
+  } else if (useLocal) {
+    item.text    = '✨ Local LLM';
+    item.tooltip = `Prompt Enhancer: using ${localModel || 'local model'} — click to switch mode`;
+  } else {
+    item.text    = '✨ Claude';
+    item.tooltip = 'Prompt Enhancer: using Claude API — click to switch mode';
+  }
+  item.show();
 }
 
 // ── Local LLM helpers (Ollama) ────────────────────────────────────────────────
@@ -188,6 +220,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   startWatching(context, (result) => {
     showPromptQuickPick(result).catch(() => { /* ignore */ });
   });
+
+  // Status bar item — shows current mode, click to switch
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.command = 'promptEnhancer.switchMode';
+  context.subscriptions.push(statusBarItem);
+  updateStatusBar(statusBarItem);
 
   // Register commands
   context.subscriptions.push(
@@ -342,6 +380,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const cfg = vscode.workspace.getConfiguration('promptEnhancer');
       await cfg.update('localLlmEndpoint', ENDPOINT, vscode.ConfigurationTarget.Global);
       await cfg.update('localLlmModel', MODEL, vscode.ConfigurationTarget.Global);
+      await cfg.update('useLocalLlm', true, vscode.ConfigurationTarget.Global);
 
       vscode.window.showInformationMessage(
         `✅ Local LLM ready! Using ${MODEL} — no API key needed.`
@@ -349,15 +388,99 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Auto-update config when any promptEnhancer setting changes
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration(async (e) => {
-      if (e.affectsConfiguration('promptEnhancer')) {
-        const apiKey = await context.secrets.get(SECRET_KEY_NAME);
-        if (apiKey) { await updateConfig(apiKey); }
+    vscode.commands.registerCommand('promptEnhancer.switchMode', async () => {
+      const cfg           = vscode.workspace.getConfiguration('promptEnhancer');
+      const isLocal       = cfg.get<boolean>('useLocalLlm', false);
+      const isEnabled     = readConfigEnabled();
+      const localEndpoint = cfg.get<string>('localLlmEndpoint', '').trim();
+      const localModel    = cfg.get<string>('localLlmModel', '').trim();
+
+      const currentLabel = !isEnabled ? 'disabled' : isLocal ? 'local' : 'claude';
+
+      const selected = await vscode.window.showQuickPick(
+        [
+          {
+            label:       '☁️  Claude API',
+            description: currentLabel === 'claude' ? '(active)' : '',
+            detail:      'Use Anthropic Claude — requires an API key',
+          },
+          {
+            label:       '🖥  Local LLM',
+            description: currentLabel === 'local' ? '(active)' : '',
+            detail:      'Use llama3.2:3b via Ollama — runs entirely on your machine',
+          },
+          {
+            label:       '⏸  Disable',
+            description: currentLabel === 'disabled' ? '(active)' : '',
+            detail:      'Pause prompt enhancement',
+          },
+        ],
+        { title: 'Prompt Enhancer: Switch Mode', placeHolder: 'Select enhancement mode' }
+      );
+
+      if (!selected) { return; }
+
+      const apiKey = (await context.secrets.get(SECRET_KEY_NAME)) ?? '';
+
+      if (selected.label.startsWith('⏸')) {
+        // Disable — write enabled: false directly to config
+        await updateConfig(apiKey, false);
+        updateStatusBar(statusBarItem);
+        vscode.window.showInformationMessage('Prompt Enhancer disabled.');
+      } else if (selected.label.startsWith('☁️')) {
+        // Switch to Claude — flip the flag, re-enable
+        await cfg.update('useLocalLlm', false, vscode.ConfigurationTarget.Global);
+        await updateConfig(apiKey, true);
+        updateStatusBar(statusBarItem);
+        vscode.window.showInformationMessage('Switched to Claude API mode.');
+      } else {
+        // Switch to Local LLM
+        if (localEndpoint && localModel) {
+          // Already configured — flip the flag, re-enable
+          await cfg.update('useLocalLlm', true, vscode.ConfigurationTarget.Global);
+          await updateConfig(apiKey, true);
+          updateStatusBar(statusBarItem);
+          vscode.window.showInformationMessage(`Switched to ${localModel} (local).`);
+        } else {
+          // Not configured yet — run setup (which also sets useLocalLlm: true)
+          await vscode.commands.executeCommand('promptEnhancer.setupLocalLlm');
+          // Re-enable after setup completes
+          await updateConfig(apiKey, true);
+          updateStatusBar(statusBarItem);
+        }
       }
     })
   );
+
+  // Auto-update config when any promptEnhancer setting changes (debounced to avoid
+  // race conditions from multiple sequential cfg.update() calls)
+  const debouncedConfigSync = debounce(async () => {
+    try {
+      const apiKey = (await context.secrets.get(SECRET_KEY_NAME)) ?? '';
+      await updateConfig(apiKey);
+      updateStatusBar(statusBarItem);
+    } catch { /* non-fatal */ }
+  }, 300);
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('promptEnhancer')) {
+        debouncedConfigSync();
+      }
+    })
+  );
+
+  // Migration: if old 'enabled' setting exists as false, preserve in config file and clean up
+  {
+    const inspected = vscode.workspace.getConfiguration('promptEnhancer').inspect<boolean>('enabled');
+    if (inspected?.globalValue === false) {
+      const apiKey = (await context.secrets.get(SECRET_KEY_NAME)) ?? '';
+      await updateConfig(apiKey, false);
+      await vscode.workspace.getConfiguration('promptEnhancer').update('enabled', undefined, vscode.ConfigurationTarget.Global);
+      updateStatusBar(statusBarItem);
+    }
+  }
 
   // First-run onboarding (runs after startup)
   setTimeout(async () => {
