@@ -78,8 +78,15 @@ export async function installHooks(apiKey: string): Promise<void> {
   const model = vscodeConfig.get<string>('modelForEnhancement', 'claude-haiku-4-5-20251001');
   const enabled = vscodeConfig.get<boolean>('enabled', true);
 
-  const systemPrompt = vscodeConfig.get<string>('systemPrompt', '').trim();
-  const config: HooksConfig = { apiKey, model, enabled, ...(systemPrompt ? { systemPrompt } : {}) };
+  const systemPrompt     = vscodeConfig.get<string>('systemPrompt', '').trim();
+  const localLlmEndpoint = vscodeConfig.get<string>('localLlmEndpoint', '').trim();
+  const localLlmModel    = vscodeConfig.get<string>('localLlmModel', '').trim();
+  const config: HooksConfig = {
+    apiKey, model, enabled,
+    ...(systemPrompt     ? { systemPrompt }     : {}),
+    ...(localLlmEndpoint ? { localLlmEndpoint } : {}),
+    ...(localLlmModel    ? { localLlmModel }    : {}),
+  };
   writeHookFiles(config);
   mergeHooksJson();
 }
@@ -116,7 +123,14 @@ export async function updateConfig(apiKey: string): Promise<void> {
   const vscodeConfig = vscode.workspace.getConfiguration('promptEnhancer');
   const model = vscodeConfig.get<string>('modelForEnhancement', 'claude-haiku-4-5-20251001');
   const enabled = vscodeConfig.get<boolean>('enabled', true);
-  const systemPrompt = vscodeConfig.get<string>('systemPrompt', '').trim();
-  const config: HooksConfig = { apiKey, model, enabled, ...(systemPrompt ? { systemPrompt } : {}) };
+  const systemPrompt     = vscodeConfig.get<string>('systemPrompt', '').trim();
+  const localLlmEndpoint = vscodeConfig.get<string>('localLlmEndpoint', '').trim();
+  const localLlmModel    = vscodeConfig.get<string>('localLlmModel', '').trim();
+  const config: HooksConfig = {
+    apiKey, model, enabled,
+    ...(systemPrompt     ? { systemPrompt }     : {}),
+    ...(localLlmEndpoint ? { localLlmEndpoint } : {}),
+    ...(localLlmModel    ? { localLlmModel }    : {}),
+  };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
 }

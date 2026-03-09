@@ -30,6 +30,8 @@ export interface HooksConfig {
   model: string;
   enabled: boolean;
   systemPrompt?: string;
+  localLlmEndpoint?: string;
+  localLlmModel?: string;
 }
 
 /** Rough token count estimate (characters / 4) */

@@ -163,9 +163,9 @@ function buildUserMessage(currentPrompt, completedTurns) {
   return `<conversation_history>\n${historyXml}\n</conversation_history>\n\n<current_prompt>\n${currentPrompt}\n</current_prompt>`;
 }
 
-async function callClaudeApi(apiKey, model, currentPrompt, completedTurns, systemPrompt) {
+async function callClaudeApi(apiKey, model, currentPrompt, completedTurns, systemPrompt, timeoutMs = 3500) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -201,6 +201,36 @@ async function callClaudeApi(apiKey, model, currentPrompt, completedTurns, syste
   }
 }
 
+async function callLocalLlmApi(endpoint, model, currentPrompt, completedTurns, systemPrompt, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = endpoint.replace(/\/$/, '') + '/chat/completions';
+    const response = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: buildUserMessage(currentPrompt, completedTurns) },
+        ],
+      }),
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) { return null; }
+    const data = await response.json();
+    const raw = (data.choices?.[0]?.message?.content ?? '').trim();
+    const jsonText = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+    return JSON.parse(jsonText);
+  } catch {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
 // ── Event handlers ───────────────────────────────────────────────────────────
 
 async function handleBeforeSubmitPrompt(input) {
@@ -211,7 +241,8 @@ async function handleBeforeSubmitPrompt(input) {
   }
 
   const config = loadConfig();
-  if (!config?.apiKey) {
+  const usingLocal = !!(config?.localLlmEndpoint && config?.localLlmModel);
+  if (!config?.apiKey && !usingLocal) {
     process.stdout.write(JSON.stringify({ continue: true }));
     process.exit(0);
   }
@@ -264,9 +295,12 @@ async function handleBeforeSubmitPrompt(input) {
     saveHistory(history);
   }
 
-  // 4. Call Claude API with context
+  // 4. Call API (local or Claude) with context
   const systemPrompt = (config.systemPrompt && config.systemPrompt.trim()) ? config.systemPrompt.trim() : DEFAULT_SYSTEM_PROMPT;
-  const result = await callClaudeApi(config.apiKey, model, originalPrompt, completedTurns, systemPrompt);
+  const timeoutMs = usingLocal ? 8000 : 3500;
+  const result = usingLocal
+    ? await callLocalLlmApi(config.localLlmEndpoint, config.localLlmModel, originalPrompt, completedTurns, systemPrompt, timeoutMs)
+    : await callClaudeApi(config.apiKey, model, originalPrompt, completedTurns, systemPrompt, timeoutMs);
 
   if (!result) {
     // Timeout or error — always pass through

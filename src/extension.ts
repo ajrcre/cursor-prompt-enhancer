@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as cp from 'child_process';
 import * as vscode from 'vscode';
 import { startWatching, readResult } from './fileWatcher';
 import {
@@ -88,6 +89,96 @@ async function showPromptQuickPick(result: EnhancerResult): Promise<void> {
       ? '✨ Enhanced prompt copied! Paste (⌘V) into chat and submit.'
       : 'Original prompt copied! Paste (⌘V) into chat and submit.'
   );
+}
+
+// ── Local LLM helpers (Ollama) ────────────────────────────────────────────────
+
+async function checkOllamaRunning(): Promise<boolean> {
+  try {
+    const res = await fetch('http://localhost:11434');
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+async function checkOllamaInstalled(): Promise<boolean> {
+  return new Promise((resolve) => {
+    cp.exec('which ollama', (err) => resolve(!err));
+  });
+}
+
+function startOllama(): Promise<void> {
+  return new Promise((resolve) => {
+    const child = cp.spawn('ollama', ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    // Give it a moment to start binding
+    setTimeout(resolve, 1000);
+  });
+}
+
+async function waitForOllama(timeoutMs = 15000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await checkOllamaRunning()) { return; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('Ollama did not start within the expected time. Please try again.');
+}
+
+async function modelIsPulled(name: string): Promise<boolean> {
+  try {
+    const res = await fetch('http://localhost:11434/api/tags');
+    if (!res.ok) { return false; }
+    const data = await res.json() as { models?: { name: string }[] };
+    return (data.models ?? []).some(m => m.name === name || m.name.startsWith(name.split(':')[0]));
+  } catch {
+    return false;
+  }
+}
+
+async function pullModel(
+  name: string,
+  progress: vscode.Progress<{ message?: string; increment?: number }>
+): Promise<void> {
+  const res = await fetch('http://localhost:11434/api/pull', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, stream: true }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Failed to start model download (HTTP ${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let lastPct = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) { break; }
+    const lines = decoder.decode(value, { stream: true }).split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line) as { status?: string; completed?: number; total?: number };
+        if (msg.total && msg.completed) {
+          const pct = Math.round((msg.completed / msg.total) * 100);
+          const delta = pct - lastPct;
+          if (delta > 0) {
+            const mb = Math.round(msg.completed / 1024 / 1024);
+            const totalMb = Math.round(msg.total / 1024 / 1024);
+            progress.report({ message: `${mb} / ${totalMb} MB`, increment: delta });
+            lastPct = pct;
+          }
+        } else if (msg.status) {
+          progress.report({ message: msg.status });
+        }
+      } catch { /* malformed line — skip */ }
+    }
+  }
 }
 
 // ── Activation ───────────────────────────────────────────────────────────────
@@ -199,6 +290,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscodeConfig.update('systemPrompt', effective, vscode.ConfigurationTarget.Global);
       // Open settings.json for proper multiline editing
       await vscode.commands.executeCommand('workbench.action.openSettingsJson');
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('promptEnhancer.setupLocalLlm', async () => {
+      const MODEL    = 'llama3.2:3b';
+      const ENDPOINT = 'http://localhost:11434/v1';
+
+      // 1. Ensure Ollama is running
+      if (!await checkOllamaRunning()) {
+        if (!await checkOllamaInstalled()) {
+          const term = vscode.window.createTerminal('Install Ollama');
+          term.show();
+          term.sendText('curl -fsSL https://ollama.com/install.sh | sh');
+          const done = await vscode.window.showInformationMessage(
+            'Run the install command in the terminal, then click Done.',
+            'Done', 'Cancel'
+          );
+          if (done !== 'Done') { return; }
+        }
+        try {
+          await startOllama();
+          await waitForOllama();
+        } catch (err) {
+          vscode.window.showErrorMessage(`Could not start Ollama: ${String(err)}`);
+          return;
+        }
+      }
+
+      // 2. Pull model if not already present
+      if (!await modelIsPulled(MODEL)) {
+        const go = await vscode.window.showInformationMessage(
+          `Download "${MODEL}" (~2 GB) to enhance prompts locally? This only happens once.`,
+          'Download', 'Cancel'
+        );
+        if (go !== 'Download') { return; }
+
+        try {
+          await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Downloading ${MODEL}`, cancellable: false },
+            (progress) => pullModel(MODEL, progress)
+          );
+        } catch (err) {
+          vscode.window.showErrorMessage(`Download failed: ${String(err)}`);
+          return;
+        }
+      }
+
+      // 3. Write settings (onDidChangeConfiguration picks this up and calls updateConfig)
+      const cfg = vscode.workspace.getConfiguration('promptEnhancer');
+      await cfg.update('localLlmEndpoint', ENDPOINT, vscode.ConfigurationTarget.Global);
+      await cfg.update('localLlmModel', MODEL, vscode.ConfigurationTarget.Global);
+
+      vscode.window.showInformationMessage(
+        `✅ Local LLM ready! Using ${MODEL} — no API key needed.`
+      );
     })
   );
 

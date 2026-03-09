@@ -1,6 +1,6 @@
 # Cursor Prompt Enhancer
 
-A Cursor extension that automatically enhances your AI prompts before submission — making them clearer, more specific, and more token-efficient — using the Claude API.
+A Cursor extension that automatically enhances your AI prompts before submission — making them clearer, more specific, and more token-efficient — using the Claude API or a local LLM (Ollama).
 
 ## How it works
 
@@ -39,7 +39,7 @@ The extension also recommends which model tier to use for the task (easy/medium/
 
 - [Cursor](https://cursor.com) editor
 - Node.js 18+ (used to run the hook script)
-- An [Anthropic API key](https://console.anthropic.com/) (for Claude enhancement)
+- An [Anthropic API key](https://console.anthropic.com/) **or** a local Ollama installation (see [Local LLM Setup](#local-llm-setup-no-api-key-needed))
 
 ## Installation
 
@@ -49,11 +49,26 @@ The extension also recommends which model tier to use for the task (easy/medium/
 
 ## Setup
 
+### Option A — Claude API (cloud)
+
 Run `Prompt Enhancer: Set API Key` from the Command Palette (`Cmd+Shift+P`) and enter your Anthropic API key.
 
 Then run `Prompt Enhancer: Install Hooks` to deploy the hook script to `~/.cursor/hooks/`.
 
 That's it — your next Cursor prompt will be enhanced automatically.
+
+### Option B — Local LLM (no API key needed) {#local-llm-setup-no-api-key-needed}
+
+Run `Prompt Enhancer: Setup Local LLM` from the Command Palette. The command will:
+
+1. **Detect Ollama** — if not installed, a terminal opens with the install script. Run it, enter your password when prompted, then run `Prompt Enhancer: Setup Local LLM` again.
+2. **Start Ollama** — launches `ollama serve` in the background automatically.
+3. **Download the model** — asks for confirmation before downloading `llama3.2:3b` (~2 GB, one-time). A progress notification shows download status.
+4. **Configure automatically** — writes `localLlmEndpoint` and `localLlmModel` to your settings. No API key needed.
+
+Then run `Prompt Enhancer: Install Hooks` if you haven't already.
+
+> **Note:** Local inference uses an 8-second timeout (vs 3.5s for Claude) to accommodate CPU-based machines. On slow hardware, the hook may occasionally pass the prompt through unchanged if the model doesn't respond in time.
 
 ## Usage
 
@@ -77,6 +92,7 @@ That's it — your next Cursor prompt will be enhanced automatically.
 | `Prompt Enhancer: Uninstall Hooks` | Remove all hook files and entries |
 | `Prompt Enhancer: Edit System Prompt` | Open the enhancement instructions in your editor |
 | `Prompt Enhancer: Show Last Result` | Re-show the QuickPick for the most recent enhancement |
+| `Prompt Enhancer: Setup Local LLM` | Install Ollama, download `llama3.2:3b`, and configure local mode |
 
 ## Configuration
 
@@ -87,6 +103,8 @@ Open Settings (`Cmd+,`) and search for `Prompt Enhancer`.
 | `promptEnhancer.enabled` | `true` | Enable/disable enhancement |
 | `promptEnhancer.modelForEnhancement` | `claude-haiku-4-5-20251001` | Claude model used for enhancement (must respond in <4s) |
 | `promptEnhancer.systemPrompt` | *(built-in)* | Instructions sent to Claude. Edit via `Prompt Enhancer: Edit System Prompt` |
+| `promptEnhancer.localLlmEndpoint` | *(empty)* | Base URL of a local OpenAI-compatible LLM (e.g. `http://localhost:11434/v1`). Set automatically by `Setup Local LLM`. |
+| `promptEnhancer.localLlmModel` | *(empty)* | Model name for the local LLM (e.g. `llama3.2:3b`). Set automatically by `Setup Local LLM`. |
 
 ### Customising the system prompt
 
@@ -104,8 +122,9 @@ Edit these to match the models available in your Cursor account. Run `Prompt Enh
 
 - Your API key is stored in VS Code's encrypted `SecretStorage` and also written to `~/.cursor/hooks/prompt-enhancer-config.json` (readable by the hook subprocess). Keep this file private.
 - The hook script (`~/.cursor/hooks/prompt-enhancer.mjs`) runs as a Node.js subprocess on every Cursor prompt submission. You can inspect it at any time.
-- Prompts are sent to the Anthropic API for enhancement. Do not use this extension with prompts containing credentials, secrets, or sensitive personal data.
-- On error or timeout (>3.5s), the hook always passes your prompt through unchanged — you are never permanently blocked.
+- **Claude mode:** Prompts are sent to the Anthropic API for enhancement. Do not use this extension with prompts containing credentials, secrets, or sensitive personal data.
+- **Local mode:** Prompts are processed entirely on your machine via Ollama — nothing leaves your computer.
+- On error or timeout, the hook always passes your prompt through unchanged — you are never permanently blocked.
 
 ## How the hook works
 
